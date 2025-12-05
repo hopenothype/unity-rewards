@@ -6,16 +6,25 @@
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
+import json
+import os
 
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
 URL = "https://vtllpagtmncbkywsqccd.supabase.co/rest/v1/rpc/rewards_get_allocations"
+SECRETS_PATH = r"D:\dev\unity\unity-rewards\play\secrets.json"
+
+with open(SECRETS_PATH, "r") as f:
+    secrets = json.load(f)
+
+API_KEY = secrets["apikey"]
+BEARER_TOKEN = secrets["bearer"]
 
 HEADERS = {
     "accept": "*/*",
-    "apikey": "sb_publishable_yKqi0fu5vV6G4ryUIMJuzw_NCoFEl1c",
-    "authorization": "Bearer eyJhbGciOiJIUzI1NiIsImtpZCI6InlHbDE2UkxxLzBzTGxac0ciLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3Z0bGxwYWd0bW5jYmt5d3NxY2NkLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI2NzI1MDkxZi0xMGI3LTQ3OTYtYWI5Zi1mM2M2OWM2ZjNjMTgiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzY0ODM4MjkxLCJpYXQiOjE3NjQ4MzQ2OTEsImVtYWlsIjoiIiwicGhvbmUiOiIiLCJhcHBfbWV0YWRhdGEiOnsicHJvdmlkZXIiOiJ3ZWIzIiwicHJvdmlkZXJzIjpbIndlYjMiXX0sInVzZXJfbWV0YWRhdGEiOnsiY3VzdG9tX2NsYWltcyI6eyJhZGRyZXNzIjoiMHgzZmQ1MjZhZGNlMDcxNjQxYmY2NzdmYjVhZjcxYjc4NGQwY2M0ZjgyIiwiY2hhaW4iOiJldGhlcmV1bSIsImRvbWFpbiI6InVuaXR5bm9kZXMuaW8iLCJuZXR3b3JrIjoiODY5Iiwic3RhdGVtZW50IjpudWxsfSwiZW1haWxfdmVyaWZpZWQiOmZhbHNlLCJwaG9uZV92ZXJpZmllZCI6ZmFsc2UsInN1YiI6IndlYjM6ZXRoZXJldW06MHgzZmQ1MjZhZGNlMDcxNjQxYmY2NzdmYjVhZjcxYjc4NGQwY2M0ZjgyIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoid2ViMyIsInRpbWVzdGFtcCI6MTc2NDY2Nzg0OH1dLCJzZXNzaW9uX2lkIjoiZmJmYzA1ZGYtMDM2NS00NWE4LWFmNDgtNzYxNDY3NTA0ZmQxIiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.acMgR-RowcoZh3NkGOZ7stATVOB7tKpN1Gm6eW-q4mk",
+    "apikey": API_KEY,
+    "authorization": "Bearer {BEARER_TOKEN}",
     "content-profile": "public",
     "content-type": "application/json",
     "origin": "https://manage.unitynodes.io",
@@ -29,7 +38,7 @@ PAYLOAD = {
 # -------------------------------------------------
 # OUTPUT DIRECTORY (customise this)
 # -------------------------------------------------
-TARGET_DIR = r"D:\dev\unity\rewards"
+TARGET_DIR = r"D:\dev\unity\unity-rewards\play\output"
 
 # -------------------------------------------------
 # FUNCTIONS

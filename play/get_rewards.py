@@ -13,7 +13,7 @@ import os
 # CONFIG
 # -------------------------------------------------
 URL = "https://vtllpagtmncbkywsqccd.supabase.co/rest/v1/rpc/rewards_get_allocations"
-SECRETS_PATH = r"D:\dev\unity\unity-rewards\play\secrets.json"
+SECRETS_PATH = r"D:\dev\unity-rewards\play\secrets.json"
 
 with open(SECRETS_PATH, "r") as f:
     secrets = json.load(f)
@@ -24,7 +24,7 @@ BEARER_TOKEN = secrets["bearer"]
 HEADERS = {
     "accept": "*/*",
     "apikey": API_KEY,
-    "authorization": "Bearer {BEARER_TOKEN}",
+    "authorization": f"Bearer {BEARER_TOKEN}",
     "content-profile": "public",
     "content-type": "application/json",
     "origin": "https://manage.unitynodes.io",
@@ -38,7 +38,7 @@ PAYLOAD = {
 # -------------------------------------------------
 # OUTPUT DIRECTORY (customise this)
 # -------------------------------------------------
-TARGET_DIR = r"D:\dev\unity\unity-rewards\play\output"
+TARGET_DIR = r"D:\dev\unity-rewards\play"
 
 # -------------------------------------------------
 # FUNCTIONS

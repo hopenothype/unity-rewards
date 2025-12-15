@@ -37,9 +37,9 @@ status_placeholder = st.empty()
 
 
 # ------------------------------------------------------------
-# FETCH REWARDS
+# FETCH REWARDS (PAGINATED)
 # ------------------------------------------------------------
-def fetch_rewards(bearer_token, api_key):
+def fetch_rewards(bearer_token, api_key, page_size=1000):
     headers = {
         "accept": "*/*",
         "apikey": api_key,
@@ -47,15 +47,33 @@ def fetch_rewards(bearer_token, api_key):
         "content-type": "application/json",
         "content-profile": "public",
     }
-    payload = {"skip": None, "take": None}
-    r = requests.post(RPC_URL, headers=headers, json=payload)
-    r.raise_for_status()
 
-    data = r.json()
-    df = pd.DataFrame(data)
+    all_rows = []
+    skip = 0
+
+    while True:
+        payload = {"skip": skip, "take": page_size}
+        r = requests.post(RPC_URL, headers=headers, json=payload)
+        r.raise_for_status()
+
+        batch = r.json()
+        if not batch:
+            break
+
+        all_rows.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        skip += page_size
+
+    if not all_rows:
+        return pd.DataFrame(columns=["licenseId", "licenseLeaseId", "completedAt", "amountMicros"])
+
+    df = pd.DataFrame(all_rows)
     df = df[["licenseId", "licenseLeaseId", "completedAt", "amountMicros"]]
     df["completedAt"] = pd.to_datetime(df["completedAt"])
-    df["date"] = df["completedAt"].dt.date    # ← NEW
+    df["date"] = df["completedAt"].dt.date
     df["amountMicros"] = df["amountMicros"].astype(float)
     df["amountUnits"] = df["amountMicros"] / 1e6
     return df
@@ -76,7 +94,6 @@ def load_boxes(file):
 # BOX STATISTICS
 # ------------------------------------------------------------
 def compute_box_stats(df_merged):
-    # Group by box and calculate metrics
     grp = df_merged.groupby("boxId")["amountUnits"]
 
     stats_df = pd.DataFrame(
@@ -90,7 +107,6 @@ def compute_box_stats(df_merged):
 
     stats_df = stats_df.sort_values("total_reward", ascending=False)
     return stats_df
-
 
 
 # ------------------------------------------------------------
@@ -165,7 +181,7 @@ if run_btn:
         status_placeholder.info("Loading boxes.csv...")
         df_boxes = load_boxes(boxes_file)
 
-        status_placeholder.info("Fetching rewards from Supabase...")
+        status_placeholder.info("Fetching rewards from Supabase (paginated)...")
         df_rewards = fetch_rewards(bearer, apikey)
 
         status_placeholder.info("Merging rewards with boxes...")
@@ -174,8 +190,57 @@ if run_btn:
         st.success(f"Fetched {len(df_rewards)} rewards.")
 
         # ------------------------------------------------------------
+        # SUMMARY METRICS
+        # ------------------------------------------------------------
+        st.markdown("---")
+        st.subheader("Summary")
+
+        total_rewards = df_rewards["amountUnits"].sum()
+        total_days = df_rewards["date"].nunique()
+        total_jobs = len(df_rewards)
+        unique_phones = df_merged["phoneID"].dropna().nunique()
+        avg_jobs_per_phone = total_jobs / unique_phones if unique_phones > 0 else 0
+        avg_reward = df_rewards["amountUnits"].mean()
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total rewards", f"{total_rewards:,.6f}")
+        c2.metric("Total days", f"{total_days}")
+        c3.metric("Total jobs", f"{total_jobs:,}")
+        c4.metric("Avg jobs per phone", f"{avg_jobs_per_phone:,.2f}")
+        c5.metric("Avg reward amount", f"{avg_reward:,.6f}")
+
+        # ------------------------------------------------------------
+        # TOP 10 REWARDS
+        # ------------------------------------------------------------
+        st.markdown("---")
+        st.subheader("Top 10 rewards (all time)")
+
+        top10 = (
+            df_merged[["date", "phoneID", "boxId", "boxType", "amountUnits"]]
+            .sort_values("amountUnits", ascending=False)
+            .head(10)
+            .rename(columns={"amountUnits": "rewardAmount"})
+        )
+        st.dataframe(top10)
+
+        # ------------------------------------------------------------
+        # TOP 10 REWARDS EXCLUDING CELLULAR
+        # ------------------------------------------------------------
+        st.subheader("Top 10 rewards (excluding cellular)")
+
+        mask_non_cell = df_merged["boxType"].fillna("").str.lower() != "cellular"
+        top10_non_cell = (
+            df_merged.loc[mask_non_cell, ["date", "phoneID", "boxId", "boxType", "amountUnits"]]
+            .sort_values("amountUnits", ascending=False)
+            .head(10)
+            .rename(columns={"amountUnits": "rewardAmount"})
+        )
+        st.dataframe(top10_non_cell)
+
+        # ------------------------------------------------------------
         # DOWNLOADS
         # ------------------------------------------------------------
+        st.markdown("---")
         col_a, col_b = st.columns(2)
         with col_a:
             st.download_button(
@@ -195,7 +260,6 @@ if run_btn:
         st.subheader("Raw merged data (head)")
         st.dataframe(df_merged.head())
 
-
         # ------------------------------------------------------------
         # BOX STATISTICS
         # ------------------------------------------------------------
@@ -209,18 +273,21 @@ if run_btn:
 
         with col_pie:
             fig_pie = px.pie(
-                stats_df, names="boxId", values="total_reward",
-                title="Total rewards per boxId"
+                stats_df,
+                names="boxId",
+                values="total_reward",
+                title="Total rewards per boxId",
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
         with col_hist:
             fig_hist = px.histogram(
-                df_rewards, x="amountUnits", nbins=50,
-                title="Reward amount distribution (units)"
+                df_rewards,
+                x="amountUnits",
+                nbins=50,
+                title="Reward amount distribution (units)",
             )
             st.plotly_chart(fig_hist, use_container_width=True)
-
 
         # ------------------------------------------------------------
         # LICENSE DISTRIBUTION (fixed dropdown)
@@ -240,11 +307,9 @@ if run_btn:
 
         agg = license_stats[chosen_box]
         fig_dual = make_dual_axis_bar(
-            agg,
-            "All boxes" if chosen_box == "__ALL__" else f"Box {chosen_box}"
+            agg, "All boxes" if chosen_box == "__ALL__" else f"Box {chosen_box}"
         )
         st.plotly_chart(fig_dual, use_container_width=True)
-
 
         # ------------------------------------------------------------
         # REWARDS OVER TIME (scatter)
@@ -261,16 +326,14 @@ if run_btn:
         )
         st.plotly_chart(fig_time, use_container_width=True)
 
-
         # ------------------------------------------------------------
-        # PHONE EARNINGS PER DAY (NEW AGGREGATION)
+        # PHONE EARNINGS PER DAY
         # ------------------------------------------------------------
         st.markdown("---")
         st.subheader("Phone earnings per day (sum of daily rewards)")
 
         df_phone = df_merged.dropna(subset=["phoneID"]).copy()
 
-        # Daily sum per phone
         daily_phone = (
             df_phone.groupby(["phoneID", "date"])["amountUnits"]
             .sum()
@@ -278,7 +341,6 @@ if run_btn:
             .sort_values("date")
         )
 
-        # Cumulative
         daily_phone["cum"] = daily_phone.groupby("phoneID")["amountUnits"].cumsum()
 
         y_col = "amountUnits"
@@ -299,16 +361,14 @@ if run_btn:
 
         st.plotly_chart(fig_phone, use_container_width=True)
 
-
         # ------------------------------------------------------------
-        # BOX EARNINGS PER DAY (NEW AGGREGATION)
+        # BOX EARNINGS PER DAY
         # ------------------------------------------------------------
         st.markdown("---")
         st.subheader("Box earnings per day (sum of daily rewards)")
 
         df_box = df_merged.dropna(subset=["boxId"]).copy()
 
-        # Daily sum per box
         daily_box = (
             df_box.groupby(["boxId", "date"])["amountUnits"]
             .sum()
@@ -316,7 +376,6 @@ if run_btn:
             .sort_values("date")
         )
 
-        # Cumulative
         daily_box["cum"] = daily_box.groupby("boxId")["amountUnits"].cumsum()
 
         y_col2 = "amountUnits"
@@ -336,7 +395,6 @@ if run_btn:
         )
 
         st.plotly_chart(fig_box, use_container_width=True)
-
 
         status_placeholder.empty()
 

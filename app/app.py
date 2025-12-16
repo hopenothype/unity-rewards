@@ -5,19 +5,27 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from datetime import date
 
 RPC_URL = "https://vtllpagtmncbkywsqccd.supabase.co/rest/v1/rpc/rewards_get_allocations"
 
 st.set_page_config(page_title="Unity Rewards Dashboard", layout="wide")
-
 st.title("Unity Rewards Dashboard")
+st.markdown("Paste your Bearer token, upload `boxes.csv`, then click **Fetch & Analyse**.")
 
-st.markdown(
-    "Paste your Bearer token, upload `boxes.csv`, then click **Fetch & Analyse**."
-)
+# ------------------------------------------------------------
+# GLOBAL DATE FILTER
+# ------------------------------------------------------------
+default_from = date(2025, 11, 30)
+default_to = date.today()
+
+c_from, c_to = st.columns(2)
+with c_from:
+    from_date = st.date_input("From date", value=default_from, format="DD/MM/YYYY")
+with c_to:
+    to_date = st.date_input("To date", value=default_to, format="DD/MM/YYYY")
 
 col1, col2 = st.columns(2)
-
 with col1:
     bearer = st.text_input("Bearer token", type="password")
 with col2:
@@ -32,7 +40,6 @@ boxes_file = st.file_uploader(
 )
 
 run_btn = st.button("Fetch & Analyse")
-
 status_placeholder = st.empty()
 
 
@@ -68,7 +75,7 @@ def fetch_rewards(bearer_token, api_key, page_size=1000):
         skip += page_size
 
     if not all_rows:
-        return pd.DataFrame(columns=["licenseId", "licenseLeaseId", "completedAt", "amountMicros"])
+        return pd.DataFrame(columns=["licenseId", "licenseLeaseId", "completedAt", "amountMicros", "date", "amountUnits"])
 
     df = pd.DataFrame(all_rows)
     df = df[["licenseId", "licenseLeaseId", "completedAt", "amountMicros"]]
@@ -95,7 +102,6 @@ def load_boxes(file):
 # ------------------------------------------------------------
 def compute_box_stats(df_merged):
     grp = df_merged.groupby("boxId")["amountUnits"]
-
     stats_df = pd.DataFrame(
         {
             "boxType": df_merged.groupby("boxId")["boxType"].first(),
@@ -104,13 +110,12 @@ def compute_box_stats(df_merged):
             "avg_reward": grp.mean(),
         }
     ).reset_index()
-
     stats_df = stats_df.sort_values("total_reward", ascending=False)
     return stats_df
 
 
 # ------------------------------------------------------------
-# LICENSE DISTRIBUTION BY BOX
+# LICENSE DISTRIBUTION BY BOX (kept for dual-axis chart if needed)
 # ------------------------------------------------------------
 def build_license_stats(df_merged):
     df = df_merged.copy()
@@ -141,15 +146,8 @@ def make_dual_axis_bar(agg, title):
     counts = agg["count"].tolist()
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-    fig.add_trace(
-        go.Bar(x=labels, y=totals, name="Total reward", opacity=0.8),
-        secondary_y=False,
-    )
-    fig.add_trace(
-        go.Bar(x=labels, y=counts, name="Reward count", opacity=0.7),
-        secondary_y=True,
-    )
+    fig.add_trace(go.Bar(x=labels, y=totals, name="Total reward", opacity=0.8), secondary_y=False)
+    fig.add_trace(go.Bar(x=labels, y=counts, name="Reward count", opacity=0.7), secondary_y=True)
 
     fig.update_layout(
         title=title,
@@ -168,6 +166,10 @@ def make_dual_axis_bar(agg, title):
 # ------------------------------------------------------------
 if run_btn:
     try:
+        if from_date > to_date:
+            st.error("From date must be earlier than (or equal to) To date.")
+            st.stop()
+
         if not bearer.strip():
             st.error("Please paste a Bearer token.")
             st.stop()
@@ -182,12 +184,16 @@ if run_btn:
         df_boxes = load_boxes(boxes_file)
 
         status_placeholder.info("Fetching rewards from Supabase (paginated)...")
-        df_rewards = fetch_rewards(bearer, apikey)
+        df_rewards_all = fetch_rewards(bearer, apikey)
+
+        df_rewards = df_rewards_all[
+            (df_rewards_all["date"] >= from_date) & (df_rewards_all["date"] <= to_date)
+        ].copy()
 
         status_placeholder.info("Merging rewards with boxes...")
         df_merged = df_rewards.merge(df_boxes, on="licenseId", how="left")
 
-        st.success(f"Fetched {len(df_rewards)} rewards.")
+        st.success(f"Fetched {len(df_rewards_all)} rewards total, {len(df_rewards)} in selected date range.")
 
         # ------------------------------------------------------------
         # SUMMARY METRICS
@@ -200,7 +206,7 @@ if run_btn:
         total_jobs = len(df_rewards)
         unique_phones = df_merged["phoneID"].dropna().nunique()
         avg_jobs_per_phone = total_jobs / unique_phones if unique_phones > 0 else 0
-        avg_reward = df_rewards["amountUnits"].mean()
+        avg_reward = df_rewards["amountUnits"].mean() if total_jobs > 0 else 0
 
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Total rewards", f"{total_rewards:,.6f}")
@@ -213,7 +219,7 @@ if run_btn:
         # TOP 10 REWARDS
         # ------------------------------------------------------------
         st.markdown("---")
-        st.subheader("Top 10 rewards (all time)")
+        st.subheader("Top 10 rewards (within selected period)")
 
         top10 = (
             df_merged[["date", "phoneID", "boxId", "boxType", "amountUnits"]]
@@ -223,9 +229,6 @@ if run_btn:
         )
         st.dataframe(top10)
 
-        # ------------------------------------------------------------
-        # TOP 10 REWARDS EXCLUDING CELLULAR
-        # ------------------------------------------------------------
         st.subheader("Top 10 rewards (excluding cellular)")
 
         mask_non_cell = df_merged["boxType"].fillna("").str.lower() != "cellular"
@@ -244,21 +247,18 @@ if run_btn:
         col_a, col_b = st.columns(2)
         with col_a:
             st.download_button(
-                "Download rewards.csv",
+                "Download rewards.csv (filtered)",
                 df_rewards.to_csv(index=False).encode("utf-8"),
                 "rewards.csv",
                 mime="text/csv",
             )
         with col_b:
             st.download_button(
-                "Download rewards_with_boxes.csv",
+                "Download rewards_with_boxes.csv (filtered)",
                 df_merged.to_csv(index=False).encode("utf-8"),
                 "rewards_with_boxes.csv",
                 mime="text/csv",
             )
-
-        st.subheader("Raw merged data (head)")
-        st.dataframe(df_merged.head())
 
         # ------------------------------------------------------------
         # BOX STATISTICS
@@ -290,26 +290,54 @@ if run_btn:
             st.plotly_chart(fig_hist, use_container_width=True)
 
         # ------------------------------------------------------------
-        # LICENSE DISTRIBUTION (fixed dropdown)
+        # DISTRIBUTION BY PHONEID (TOP 5 BOXES)
         # ------------------------------------------------------------
         st.markdown("---")
-        st.subheader("License distribution by box")
+        st.subheader("Distribution by phone (top 5 boxes)")
 
-        license_stats = build_license_stats(df_merged)
-
-        box_options = [("__ALL__", "All boxes")] + [
-            (b, str(b)) for b in license_stats.keys() if b != "__ALL__"
-        ]
-        box_dict = {label: value for (value, label) in box_options}
-
-        chosen_label = st.selectbox("Select box", list(box_dict.keys()))
-        chosen_box = box_dict[chosen_label]
-
-        agg = license_stats[chosen_box]
-        fig_dual = make_dual_axis_bar(
-            agg, "All boxes" if chosen_box == "__ALL__" else f"Box {chosen_box}"
+        top_boxes = (
+            stats_df[["boxId", "boxType", "total_reward"]]
+            .dropna(subset=["boxId"])
+            .head(5)
+            .copy()
         )
-        st.plotly_chart(fig_dual, use_container_width=True)
+
+        if top_boxes.empty:
+            st.info("No box data available in the selected period.")
+        else:
+            box_ids = top_boxes["boxId"].tolist()
+
+            df_box_phone = df_merged.dropna(subset=["boxId", "phoneID"]).copy()
+            df_box_phone = df_box_phone[df_box_phone["boxId"].isin(box_ids)]
+
+            agg_box_phone = (
+                df_box_phone.groupby(["boxId", "phoneID"])["amountUnits"]
+                .sum()
+                .reset_index()
+                .rename(columns={"amountUnits": "totalReward"})
+            )
+
+            cols = st.columns(2)
+            for i, row in enumerate(top_boxes.itertuples(index=False)):
+                box_id = row.boxId
+                box_type = row.boxType
+
+                plot_df = agg_box_phone[agg_box_phone["boxId"] == box_id].sort_values("totalReward", ascending=False)
+
+                fig = px.bar(
+                    plot_df,
+                    x="phoneID",
+                    y="totalReward",
+                    title=f"Box {box_id} ({box_type}) - total rewards by phone",
+                    labels={"phoneID": "Phone ID", "totalReward": "Total rewards (units)"},
+                )
+                fig.update_layout(margin=dict(t=60, l=40, r=40, b=80))
+
+                if i < 4:
+                    with cols[i % 2]:
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.plotly_chart(fig, use_container_width=True)
 
         # ------------------------------------------------------------
         # REWARDS OVER TIME (scatter)
@@ -333,7 +361,6 @@ if run_btn:
         st.subheader("Phone earnings per day (sum of daily rewards)")
 
         df_phone = df_merged.dropna(subset=["phoneID"]).copy()
-
         daily_phone = (
             df_phone.groupby(["phoneID", "date"])["amountUnits"]
             .sum()
@@ -341,24 +368,18 @@ if run_btn:
             .sort_values("date")
         )
 
-        daily_phone["cum"] = daily_phone.groupby("phoneID")["amountUnits"].cumsum()
-
-        y_col = "amountUnits"
-
         fig_phone = px.line(
             daily_phone,
             x="date",
-            y=y_col,
+            y="amountUnits",
             color="phoneID",
             title="Daily earnings per phone",
         )
-
         fig_phone.update_layout(
             hovermode="x unified",
             legend_title_text="Phone ID",
             margin=dict(t=60, l=40, r=40, b=40),
         )
-
         st.plotly_chart(fig_phone, use_container_width=True)
 
         # ------------------------------------------------------------
@@ -368,7 +389,6 @@ if run_btn:
         st.subheader("Box earnings per day (sum of daily rewards)")
 
         df_box = df_merged.dropna(subset=["boxId"]).copy()
-
         daily_box = (
             df_box.groupby(["boxId", "date"])["amountUnits"]
             .sum()
@@ -376,24 +396,18 @@ if run_btn:
             .sort_values("date")
         )
 
-        daily_box["cum"] = daily_box.groupby("boxId")["amountUnits"].cumsum()
-
-        y_col2 = "amountUnits"
-
         fig_box = px.line(
             daily_box,
             x="date",
-            y=y_col2,
+            y="amountUnits",
             color="boxId",
             title="Daily earnings per box",
         )
-
         fig_box.update_layout(
             hovermode="x unified",
             legend_title_text="Box ID",
             margin=dict(t=60, l=40, r=40, b=40),
         )
-
         st.plotly_chart(fig_box, use_container_width=True)
 
         status_placeholder.empty()

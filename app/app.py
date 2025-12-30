@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import date
 
-RPC_URL = "https://vtllpagtmncbkywsqccd.supabase.co/rest/v1/rpc/rewards_get_allocations"
+RPC_URL = "https://api.unityedge.io/rest/v1/rpc/rewards_get_allocations"
 
 st.set_page_config(page_title="Unity Rewards Dashboard", layout="wide")
 st.title("Unity Rewards Dashboard")

@@ -120,25 +120,52 @@ def fetch_rewards(bearer_token, api_key, page_size=1000):
 
     all_rows = []
     skip = 0
+    page = 1
 
     while True:
         payload = {"skip": skip, "take": page_size}
+
+        print(f"[DEBUG] Fetching page {page} (skip={skip}, take={page_size})")
+
         r = requests.post(RPC_URL, headers=headers, json=payload)
         r.raise_for_status()
 
         batch = r.json()
+        batch_count = len(batch)
+
+        # --- DEBUG: console + UI ---
+        msg = (
+            f"Page {page}: fetched {batch_count} records "
+            f"(total so far: {len(all_rows) + batch_count})"
+        )
+        print(f"[DEBUG] {msg}")
+        status_placeholder.write(msg)
+
         if not batch:
+            print("[DEBUG] No more records. Stopping pagination.")
             break
 
         all_rows.extend(batch)
-        if len(batch) < page_size:
+
+        if batch_count < page_size:
+            print("[DEBUG] Last page reached (batch < page_size).")
             break
 
         skip += page_size
+        page += 1
+
+    print(f"[DEBUG] Finished fetching. Total records: {len(all_rows)}")
 
     if not all_rows:
         return pd.DataFrame(
-            columns=["licenseId", "licenseLeaseId", "completedAt", "amountMicros", "date", "amountUnits"]
+            columns=[
+                "licenseId",
+                "licenseLeaseId",
+                "completedAt",
+                "amountMicros",
+                "date",
+                "amountUnits",
+            ]
         )
 
     df = pd.DataFrame(all_rows)
@@ -147,6 +174,7 @@ def fetch_rewards(bearer_token, api_key, page_size=1000):
     df["date"] = df["completedAt"].dt.date
     df["amountMicros"] = df["amountMicros"].astype(float)
     df["amountUnits"] = df["amountMicros"] / 1e6
+
     return df
 
 
@@ -250,15 +278,15 @@ if run_btn:
         )
         st.dataframe(top10, use_container_width=True)
 
-        st.subheader("Top 10 rewards (excluding cellular)")
-        mask_non_cell = df_merged["boxType"].fillna("").str.lower() != "cellular"
-        top10_non_cell = (
-            df_merged.loc[mask_non_cell, ["date", "phoneID", "boxId", "boxType", "amountUnits"]]
-            .sort_values("amountUnits", ascending=False)
-            .head(10)
-            .rename(columns={"amountUnits": "rewardAmount($)"})
-        )
-        st.dataframe(top10_non_cell, use_container_width=True)
+        # st.subheader("Top 10 rewards (excluding cellular)")
+        # mask_non_cell = df_merged["boxType"].fillna("").str.lower() != "cellular"
+        # top10_non_cell = (
+        #     df_merged.loc[mask_non_cell, ["date", "phoneID", "boxId", "boxType", "amountUnits"]]
+        #     .sort_values("amountUnits", ascending=False)
+        #     .head(10)
+        #     .rename(columns={"amountUnits": "rewardAmount($)"})
+        # )
+        # st.dataframe(top10_non_cell, use_container_width=True)
 
         # ------------------------------------------------------------
         # SHARED IPs STATISTICS
